@@ -1,6 +1,8 @@
-flask
-flask-cors
-yfinance
-pandas
-numpy
-scikit-learn
+fastapi 
+uvicorn 
+scikit-learn 
+joblib 
+yfinance 
+numpy 
+pandas 
+matplotlib 
