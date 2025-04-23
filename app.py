@@ -113,3 +113,32 @@ if __name__ == '__main__':
 #     buildCommand: pip install -r requirements.txt
 #     startCommand: python app.py
 #     plan: free
+@app.route('/etf/<symbol>')
+def etf_dashboard(symbol):
+    symbol = symbol.upper()
+    if symbol not in ETF_LIST:
+        return jsonify({'error': 'Symbol not supported'}), 400
+
+    df = DATA[symbol]
+    model = MODELS[symbol]
+    latest_price = df['Adj Close'].iloc[-1]
+    prev_price = df['Adj Close'].iloc[-2]
+    change = round((latest_price - prev_price) / prev_price * 100, 2)
+
+    signal = "buy" if change > 0 else "sell"
+    confidence = int(abs(change) * 10)  # dummy logic for now
+
+    # Chart data
+    chart_dates = df.index[-30:].strftime('%Y-%m-%d').tolist()
+    chart_prices = df['Adj Close'].iloc[-30:].round(2).tolist()
+
+    return jsonify({
+        "price": round(float(latest_price), 2),
+        "changePercent": change,
+        "signal": signal,
+        "confidence": confidence,
+        "chart": {
+            "dates": chart_dates,
+            "prices": chart_prices
+        }
+    })
