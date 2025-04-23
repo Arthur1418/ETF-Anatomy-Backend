@@ -43,7 +43,6 @@ def get_latest_features(df):
     return df[FEATURES].iloc[-1].values.reshape(1, -1)
 
 # RSI calculation
-
 def compute_rsi(series, period=14):
     delta = series.diff()
     gain = (delta.where(delta > 0, 0)).rolling(period).mean()
@@ -52,6 +51,7 @@ def compute_rsi(series, period=14):
     return 100 - (100 / (1 + rs))
 
 # --- API Endpoints ---
+
 @app.route('/api/predict/<symbol>')
 def predict(symbol):
     symbol = symbol.upper()
@@ -79,7 +79,6 @@ def explain(symbol):
     if symbol not in ETF_LIST:
         return jsonify({'error': 'Symbol not supported'}), 400
     df = DATA[symbol]
-    # Compute latest indicators
     rsi_series = compute_rsi(df['Adj Close'])
     latest_rsi = round(rsi_series.iloc[-1], 1)
     ma50 = df['SMA_50'].iloc[-1]
@@ -94,25 +93,7 @@ def explain(symbol):
         explanation.append("Recent volume spike detected.")
     return jsonify({'symbol': symbol, 'explanation': explanation})
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
-
-# requirements.txt
-# flask
-# flask-cors
-# yfinance
-# pandas
-# numpy
-# scikit-learn
-
-# render.yaml
-# services:
-#   - type: web
-#     name: etf-anatomy-backend
-#     env: python
-#     buildCommand: pip install -r requirements.txt
-#     startCommand: python app.py
-#     plan: free
+# ✅ Moved this route ABOVE the main block
 @app.route('/etf/<symbol>')
 def etf_dashboard(symbol):
     symbol = symbol.upper()
@@ -126,9 +107,8 @@ def etf_dashboard(symbol):
     change = round((latest_price - prev_price) / prev_price * 100, 2)
 
     signal = "buy" if change > 0 else "sell"
-    confidence = int(abs(change) * 10)  # dummy logic for now
+    confidence = int(abs(change) * 10)
 
-    # Chart data
     chart_dates = df.index[-30:].strftime('%Y-%m-%d').tolist()
     chart_prices = df['Adj Close'].iloc[-30:].round(2).tolist()
 
@@ -142,3 +122,7 @@ def etf_dashboard(symbol):
             "prices": chart_prices
         }
     })
+
+# --- Start App ---
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
