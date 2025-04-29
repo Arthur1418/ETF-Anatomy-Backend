@@ -1,122 +1,89 @@
-from fastapi import FastAPI
-from pydantic import BaseModel
-import yfinance as yf
-import numpy as np
-import pandas as pd
-from sklearn.linear_model import LinearRegression
-import joblib
-import matplotlib.pyplot as plt
-from io import BytesIO
-import base64
+from flask import Flask, jsonify
+from flask_cors import CORS
+from datetime import datetime
 
-app = FastAPI()
+app = Flask(__name__)
+CORS(app)  # Allow frontend requests
 
-# Define the model for the input data
-class ETFRequest(BaseModel):
-    ticker: str
-    start_date: str
-    end_date: str
-
-# Load or initialize your model (you can replace this with a trained model)
-def train_model(ticker: str, start_date: str, end_date: str):
-    data = yf.download(ticker, start=start_date, end=end_date)
-    data['Returns'] = data['Adj Close'].pct_change()
-
-    # Prepare the data for training the model
-    data.dropna(inplace=True)
-    X = np.array(range(len(data))).reshape(-1, 1)  # Time as the feature (simple linear regression)
-    y = data['Returns'].values
-
-    model = LinearRegression()
-    model.fit(X, y)
-
-    # Save the model for future use
-    joblib.dump(model, f'{ticker}_model.pkl')
-
-# Predict the ETF movement using the trained model
-def predict_movement(ticker: str, start_date: str, end_date: str):
-    # Load the trained model
-    model = joblib.load(f'{ticker}_model.pkl')
-
-    # Get the historical data for prediction
-    data = yf.download(ticker, start=start_date, end=end_date)
-    data['Returns'] = data['Adj Close'].pct_change()
-    data.dropna(inplace=True)
-
-    # Use the model to predict future returns
-    X = np.array(range(len(data), len(data) + 1)).reshape(-1, 1)
-    predicted_return = model.predict(X)
-
-    return predicted_return[0]
-
-# Generate a simple plot of the ETF performance over time
-def generate_plot(ticker: str, start_date: str, end_date: str):
-    data = yf.download(ticker, start=start_date, end=end_date)
-    data['Adj Close'].plot(title=f'{ticker} Price Over Time')
-    
-    plt.xlabel('Date')
-    plt.ylabel('Price')
-    plt.tight_layout()
-    
-    # Convert plot to PNG
-    img = BytesIO()
-    plt.savefig(img, format='png')
-    img.seek(0)
-    
-    # Encode PNG to base64
-    plot_base64 = base64.b64encode(img.getvalue()).decode('utf-8')
-    
-    return plot_base64
-
-@app.get("/")
-def read_root():
-    return {"message": "Welcome to the ETF Prediction API!"}
-
-@app.post("/predict")
-def predict_etf(data: ETFRequest):
-    ticker = data.ticker
-    start_date = data.start_date
-    end_date = data.end_date
-    
-    try:
-        # Train the model if not already done (or you can skip this if already trained)
-        train_model(ticker, start_date, end_date)
-
-        # Make the prediction using the trained model
-        prediction = predict_movement(ticker, start_date, end_date)
-        
-        # Generate plot for the ETF
-        plot = generate_plot(ticker, start_date, end_date)
-
-        return {
-            "ticker": ticker,
-            "predicted_return": prediction,
-            "plot": plot
+# Sample ETF data (mocked)
+ETF_DATA = {
+    "niftybees": {
+        "price": 215.85,
+        "changePercent": 0.58,
+        "signal": "BUY",
+        "confidence": 76,
+        "chart": {
+            "dates": ["2024-04-20", "2024-04-21", "2024-04-22"],
+            "prices": [210.3, 213.6, 215.85]
         }
-    
-    except Exception as e:
-        return {"error": str(e)}
+    },
+    "bankbees": {
+        "price": 430.15,
+        "changePercent": -0.42,
+        "signal": "SELL",
+        "confidence": 64,
+        "chart": {
+            "dates": ["2024-04-20", "2024-04-21", "2024-04-22"],
+            "prices": [435.0, 432.0, 430.15]
+        }
+    },
+    "itbees": {
+        "price": 320.50,
+        "changePercent": 0.78,
+        "signal": "BUY",
+        "confidence": 81,
+        "chart": {
+            "dates": ["2024-04-20", "2024-04-21", "2024-04-22"],
+            "prices": [312.0, 318.9, 320.5]
+        }
+    },
+    "psubankbees": {
+        "price": 55.90,
+        "changePercent": -0.12,
+        "signal": "HOLD",
+        "confidence": 50,
+        "chart": {
+            "dates": ["2024-04-20", "2024-04-21", "2024-04-22"],
+            "prices": [56.3, 56.1, 55.9]
+        }
+    }
+}
 
-# Import FastAPI to create our server and BaseModel to structure incoming data
-from fastapi import FastAPI
-from pydantic import BaseModel
+@app.route("/etf/<string:ticker>")
+def get_etf_data(ticker):
+    data = ETF_DATA.get(ticker.lower())
+    if not data:
+        return jsonify({"error": "ETF not found"}), 404
+    return jsonify(data)
 
-# Create a FastAPI app that will handle our requests
-app = FastAPI()
+@app.route("/market")
+def get_market_data():
+    return jsonify({
+        "sp500": 5105.75,
+        "nasdaq": 16120.40,
+        "vix": 13.45,
+        "lastUpdated": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    })
 
-# This is the structure of data we will receive from the frontend (your website).
-class PredictionRequest(BaseModel):
-    feature1: float  # This represents one type of data you will send (replace with actual features)
-    feature2: float  # Another type of data (replace with actual features)
+@app.route("/prediction")
+def get_prediction_data():
+    return jsonify({
+        "labels": ["Jan", "Feb", "Mar", "Apr"],
+        "data": [120, 135, 128, 145]
+    })
 
-# This is an endpoint to check if the server is working.
-@app.get("/")
-def read_root():
-    return {"message": "Hello, World!"}
+@app.route("/api/etf/india")
+def get_indian_etfs():
+    return jsonify({k: v for k, v in ETF_DATA.items() if k in ["niftybees", "bankbees", "itbees", "psubankbees"]})
 
-# This is where we receive data from the frontend (your website) and return a prediction.
-@app.post("/predict")
-def predict(request: PredictionRequest):
-    # The prediction logic would go here (for now it's just a mock example).
-    prediction = "Buy"  # Replace this with actual prediction logic
-    return {"prediction": prediction}
+# Optional: If needed in future
+@app.route("/api/etf/us")
+def get_us_etfs():
+    return jsonify({})  # Add US ETFs here
+
+@app.route("/api/etf/global")
+def get_global_etfs():
+    return jsonify({})  # Add global ETFs here
+
+if __name__ == "__main__":
+    app.run(debug=True)
