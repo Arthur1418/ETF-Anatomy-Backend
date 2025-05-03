@@ -1,128 +1,88 @@
-from flask import Flask, jsonify
-from flask_cors import CORS
-import yfinance as yf
-import pandas as pd
-import numpy as np
-from sklearn.ensemble import RandomForestRegressor
 import os
+import numpy as np
+import pandas as pd
+import yfinance as yf
+from flask import Flask, jsonify
+from sklearn.ensemble import RandomForestClassifier
+import joblib
 
 app = Flask(__name__)
-CORS(app)
+app.config["DEBUG"] = True  # Enable debug mode
 
-ETF_LIST = ["SPY", "QQQ", "VTI", "IWM"]
-MODELS = {}
-DATA = {}
-FEATURES = ['Open', 'High', 'Low', 'Volume', 'SMA_50', 'SMA_200', 'Volatility']
-TARGET = 'Adj Close'
+# List of ETF symbols for prediction
+symbols = ['SPY', 'QQQ', 'VTI', 'IWM']
 
-# --- Data and Model Preparation ---
+# Function to load the ETF data
 def load_data(symbol):
     end = pd.Timestamp.today()
     start = end - pd.Timedelta(days=5*365)
-    df = yf.download(symbol, start=start, end=end)
-    df.dropna(inplace=True)
-    df['Return'] = df['Adj Close'].pct_change()
+    df = yf.download(symbol, start=start, end=end, auto_adjust=True)
+    
+    # Print out the first few rows of the data for debugging
+    print(f"Data for {symbol}:")
+    print(df.head())  # Print the first few rows of data to inspect its structure
+
+    # Flatten the MultiIndex if present and print available columns
+    df.columns = df.columns.droplevel(1)  # Remove multi-level column names
+    print(f"Loaded data columns for {symbol}: {df.columns}")
+
+    # Ensure we are using 'Close' instead of 'Adj Close'
+    if 'Adj Close' in df.columns:
+        df.drop(columns=['Adj Close'], inplace=True)
+
+    # Use 'Close' for calculations
+    df['Return'] = df['Close'].pct_change()
     df['Volatility'] = df['Return'].rolling(window=21).std() * np.sqrt(252)
-    df['SMA_50'] = df['Adj Close'].rolling(window=50).mean()
-    df['SMA_200'] = df['Adj Close'].rolling(window=200).mean()
+    df['SMA_50'] = df['Close'].rolling(window=50).mean()
+    df['SMA_200'] = df['Close'].rolling(window=200).mean()
     df.dropna(inplace=True)
     return df
 
-# Train models at startup
-for symbol in ETF_LIST:
+# Function to train a model for each symbol
+def train_model(symbol):
     df = load_data(symbol)
-    DATA[symbol] = df
-    X = df[FEATURES]
-    y = df[TARGET]
-    model = RandomForestRegressor(n_estimators=100, random_state=42)
+    
+    # Prepare data for training
+    X = df[['Volatility', 'SMA_50', 'SMA_200']]
+    y = (df['Return'] > 0).astype(int)  # 1 if the return is positive, 0 if negative
+
+    model = RandomForestClassifier(n_estimators=100)
     model.fit(X, y)
-    MODELS[symbol] = model
+    
+    # Save the model
+    model_filename = f"{symbol}_model.pkl"
+    joblib.dump(model, model_filename)
+    print(f"Model for {symbol} trained and stored.")
 
-# --- Helper Functions ---
-def get_latest_features(df):
-    return df[FEATURES].iloc[-1].values.reshape(1, -1)
+# Train models for each ETF symbol
+for symbol in symbols:
+    train_model(symbol)
 
-# RSI calculation
-def compute_rsi(series, period=14):
-    delta = series.diff()
-    gain = (delta.where(delta > 0, 0)).rolling(period).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(period).mean()
-    rs = gain / loss
-    return 100 - (100 / (1 + rs))
+# Function to make a prediction for a given symbol
+def make_prediction(symbol):
+    df = load_data(symbol)
+    X = df[['Volatility', 'SMA_50', 'SMA_200']].iloc[-1:].values
+    model_filename = f"{symbol}_model.pkl"
+    
+    # Load the trained model
+    model = joblib.load(model_filename)
+    
+    # Make a prediction (0 = sell, 1 = buy)
+    prediction = model.predict(X)
+    
+    return 'Buy' if prediction == 1 else 'Sell'
 
-# --- API Endpoints ---
+@app.route('/')
+def index():
+    return jsonify({'message': 'Welcome to the ETF prediction API!'})
 
-@app.route('/api/predict/<symbol>')
+@app.route('/predict/<symbol>')
 def predict(symbol):
-    symbol = symbol.upper()
-    if symbol not in ETF_LIST:
-        return jsonify({'error': 'Symbol not supported'}), 400
-    df = DATA[symbol]
-    model = MODELS[symbol]
-    features = get_latest_features(df)
-    pred = model.predict(features)[0]
-    return jsonify({'symbol': symbol, 'predicted_price': round(float(pred), 2)})
+    if symbol not in symbols:
+        return jsonify({'error': 'Invalid symbol. Available symbols are: SPY, QQQ, VTI, IWM.'})
 
-@app.route('/api/risk/<symbol>')
-def risk(symbol):
-    symbol = symbol.upper()
-    if symbol not in ETF_LIST:
-        return jsonify({'error': 'Symbol not supported'}), 400
-    df = DATA[symbol]
-    latest_vol = round(df['Volatility'].iloc[-1], 4)
-    sharpe = round(df['Return'].mean() / df['Return'].std() * np.sqrt(252), 2)
-    return jsonify({'symbol': symbol, 'volatility': latest_vol, 'sharpe_ratio': sharpe})
+    prediction = make_prediction(symbol)
+    return jsonify({'symbol': symbol, 'prediction': prediction})
 
-@app.route('/api/explain/<symbol>')
-def explain(symbol):
-    symbol = symbol.upper()
-    if symbol not in ETF_LIST:
-        return jsonify({'error': 'Symbol not supported'}), 400
-    df = DATA[symbol]
-    rsi_series = compute_rsi(df['Adj Close'])
-    latest_rsi = round(rsi_series.iloc[-1], 1)
-    ma50 = df['SMA_50'].iloc[-1]
-    ma200 = df['SMA_200'].iloc[-1]
-    price = df['Adj Close'].iloc[-1]
-    crossover = 'above' if price > ma50 else 'below'
-    volume_spike = df['Volume'].iloc[-1] > df['Volume'].rolling(window=20).mean().iloc[-1] * 1.5
-    explanation = []
-    explanation.append(f"RSI (14) is {latest_rsi}.")
-    explanation.append(f"Price is {crossover} 50-day MA.")
-    if volume_spike:
-        explanation.append("Recent volume spike detected.")
-    return jsonify({'symbol': symbol, 'explanation': explanation})
-
-@app.route('/etf/<symbol>')
-def etf_dashboard(symbol):
-    symbol = symbol.upper()
-    if symbol not in ETF_LIST:
-        return jsonify({'error': 'Symbol not supported'}), 400
-
-    df = DATA[symbol]
-    model = MODELS[symbol]
-    latest_price = df['Adj Close'].iloc[-1]
-    prev_price = df['Adj Close'].iloc[-2]
-    change = round((latest_price - prev_price) / prev_price * 100, 2)
-
-    signal = "buy" if change > 0 else "sell"
-    confidence = int(abs(change) * 10)
-
-    chart_dates = df.index[-30:].strftime('%Y-%m-%d').tolist()
-    chart_prices = df['Adj Close'].iloc[-30:].round(2).tolist()
-
-    return jsonify({
-        "price": round(float(latest_price), 2),
-        "changePercent": change,
-        "signal": signal,
-        "confidence": confidence,
-        "chart": {
-            "dates": chart_dates,
-            "prices": chart_prices
-        }
-    })
-
-# --- Start App ---
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port)
+    app.run()
