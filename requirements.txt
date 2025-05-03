@@ -1,4 +1,8 @@
 flask
-flask-cors
-gunicorn
+pandas
+numpy
+scikit-learn
+requests
 yfinance
+joblib
+flask-cors
