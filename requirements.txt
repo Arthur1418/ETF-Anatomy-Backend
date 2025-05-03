@@ -6,3 +6,4 @@ requests
 yfinance
 joblib
 flask-cors
+gunicorn
