@@ -1,10 +1,10 @@
-# app.py
 from flask import Flask, jsonify
 from flask_cors import CORS
 import yfinance as yf
 import pandas as pd
 import numpy as np
 from sklearn.ensemble import RandomForestRegressor
+import os
 
 app = Flask(__name__)
 CORS(app)
@@ -93,7 +93,6 @@ def explain(symbol):
         explanation.append("Recent volume spike detected.")
     return jsonify({'symbol': symbol, 'explanation': explanation})
 
-# ✅ Moved this route ABOVE the main block
 @app.route('/etf/<symbol>')
 def etf_dashboard(symbol):
     symbol = symbol.upper()
@@ -125,4 +124,5 @@ def etf_dashboard(symbol):
 
 # --- Start App ---
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
